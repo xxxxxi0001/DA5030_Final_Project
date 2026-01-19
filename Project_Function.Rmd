@@ -1,0 +1,932 @@
+---
+title: "Project_Function"
+output: html_document
+---
+
+```{r}
+m_value<-median(df$RestingBP, na.rm=TRUE)
+df$RestingBP[is.na(df$RestingBP)]<-m_value
+```
+
+## Median Imputation (func)
+```{r}
+# Input: 1). df: the data frame that has NA need median imputation treatment
+#        2). target_col: columns name that need its NA be treated with median imputation
+# Return:1). df: data frame with designated column successfully impute
+# Usage: 1). list of column: df<-median_imputation(df,c("a","b"))
+#        2). one column: df<-median_imputation(df,"a")
+median_imputation<-function(df,target_col) {
+  
+  # if more than one column need to be imputated
+  if (length(target_col)>1) {
+    
+    # loop over each column and perform median imputation
+    for (i in target_col) {
+      m_value<-median(df[[i]], na.rm=TRUE)
+      df[[i]][is.na(df[[i]])]<-m_value
+    }
+  }
+  
+  # if there is only one column need to be treated
+  else {
+    
+    # median imputation
+    m_value<-median(df[[target_col]], na.rm=TRUE)
+    df[[target_col]][is.na(df[[target_col]])]<-m_value
+  }
+  
+  # return data frame
+  return(df)
+}
+```
+
+
+```{r}
+mean_v<-mean(df$Age)
+sd_v<-sd(df$Age)
+z_v<-(df$Age-mean_v)/sd_v
+
+up_b<-mean_v+3*sd_v
+lower_b<-mean_v-3*sd_v
+
+df$Age[z_v>3]<-up_b
+df$Age[z_v<3]<-lower_b
+```
+
+## z-score Outlier Treatment (func)
+```{r}
+# Input: 1). df: the data frame that has feature need outlier treatment 
+#        2). variable: variables that need outlier treatment & normally distributed
+# Return:1). df: data frame with designated variables successfully treated 
+# Usage: 1). list of column: df<-z_score_outlier(df,c("a","b"))
+#        2). one column: df<-z_score_outlier(df,"a")
+z_score_outlier<-function(df,variable) {
+  
+  # for each variable calculate their mean, standard deviation and z-score
+  for (i in variable) {
+    
+    mean_v<-mean(df[[i]],na.rm = TRUE)
+    sd_v<-sd(df[[i]],na.rm = TRUE)
+    z_v<-(df[[i]]-mean_v)/sd_v
+    
+    # calculate upper boundary & lower boundary
+    up_b<-mean_v+3*sd_v
+    lower_b<-mean_v-3*sd_v
+    
+    # Get how many outliers detected for output result
+    outlier<-sum(z_v > 3,na.rm = TRUE)+sum(z_v < -3,na.rm = TRUE)
+    
+    # Replace upper outliers with upper boundary, lower outliers with lower boundary
+    df[[i]][z_v > 3]<-up_b
+    df[[i]][z_v < -3]<-lower_b
+    
+    # Output result
+    cat("There are total",outlier, "outliers detected for feature", i, ". Above upper boundary ", up_b, "is replaced into ", up_b, ". Below lower boundary", lower_b, "is replaced into", lower_b, "\n")
+  }
+  
+  # return data frame
+  return(df)
+}
+```
+
+## Cross Validation: k stratified (func)
+```{r}
+# Input: 1). k: the number of fold you wanna test 
+#        2). df: the data frame you wanna test with
+#        3). target_col: the column that need to be predict
+#        4). positive: target_col's positive value
+#        5). negative: target_col's negative value
+# Return:1). index_list: k stratified index list 
+# Usage: 1). index_list<-k_stratified_cv(5,df,"col_name",1,0)
+k_stratified_cv<-function(k,df,target_col,train_index,positive,negative){
+  
+  # Get train_index
+  train_label<-df[[target_col]][train_index]
+  
+  # Get positive negative's local position
+  postive_label<-which(train_label==positive)
+  negative_label<-which(train_label==negative)
+  
+  # Get positive negative's global position
+  positive_index<-train_index[positive_local]
+  negative_index<-train_index[negative_local]
+  
+  # Initialize length of positive/negative that need to be selected
+  length_sub_p<-floor(length(positive_index)/k)
+  length_sub_n<-floor(length(negative_index)/k)
+  
+  # Initialize a list to store all index
+  index_list<-vector("list",k)
+  
+  # Loop over k stratified
+  for (i in 1:k) {
+    
+    # If this is the last one, include all index (so no one is left out)
+    # Avoid residual problem
+    if (i==k){
+      index_list[[i]]<-c(positive_index,negative_index)
+      break
+    }
+  
+    # Get positive index, negative index as designated portion so it won't fall in class imbalance
+    p_sub<-positive_index[1:length_sub_p]
+    n_sub<-negative_index[1:length_sub_n]
+  
+    # combine them as index list and shuffle so it won't be positive/negative cluster together
+    index_list[[i]]<-sample(c(p_sub,n_sub))
+    # remove selected index
+    positive_index<-positive_index[-(1:length_sub_p)]
+    negative_index<-negative_index[-(1:length_sub_n)]
+  }
+  return(index_list)
+}
+```
+
+
+```{r}
+index_list<-k_stratified_cv(5,df_encoded_LR,"HeartDisease",train_index,1,0)
+```
+
+
+## Cross Valition (func)
+(need function backward_p_lr to perform)
+```{r}
+# Input: 1). df: the data frame you wanna test with
+#        2). index_list: the index list generated earlier
+#        3). positive: target_col's positive value
+#        4). negative: target_col's negative value
+#        5). positive weight: the portion of positive of overall value
+#        6). negative_weight: the portion of negative of overall value
+#        7). threshold: set to 0.5, but can be changed
+#        8). target_col: the column need to be predicted
+# Return:Nothing, but will tell you the performance of this specific pipeline  
+# Usage: cross_validation(df,index_list,1,0,1,1,0.5,"col_name")
+cross_validation<-function(df,index_list,positive,negative,positive_weight,negative_weight,target_col,threshold=0.5){
+  
+  # Initialization for overall performance calculation
+  F1_total<-0
+  accuracy_total<-0
+  tpr_total<-0
+  tnr_total<-0
+  
+  # For each index list
+  for (i in 1:length(index_list)) {
+    
+    # Select list i as test, rest as train
+    test_index<-index_list[[i]]
+    train_index<-unlist(index_list[-i])
+  
+    # train model with train index
+    model<-backward_p_lr(df,train_index,target_col,positive,positive_weight,negative_weight)
+    
+    # get prediction probability with test index
+    predict<-predict(model,df[test_index,],type="response")
+    
+    # get performance's value
+    result<-check_model_performance(predict,threshold, positive, negative, df, test_index, target_col)
+    accracy<-result$accuracy
+    tpr<-result$tpr
+    tnr<-result$tnr
+    F1<-result$F1
+    
+    # calculate each performance's value
+    F1_total<-F1_total+F1
+    accuracy_total<-accuracy_total+accuracy
+    tpr_total<-tpr_total+tpr
+    tnr_total<-tnr_total+tnr
+  
+    # and output result
+    cat("The fold",i,"of total",length(index_list),"fold's F1 value is",F1,", accuracy is ",accuracy,", true positive rate is",tpr,", true negative rate is", tnr,".\n")
+  }
+  
+  # get overall performance's value
+  F1_overall<-round(F1_total/length(index_list),2)
+  accuracy_overall<-round(accuracy_total/length(index_list),2)
+  tpr_overall<-round(tpr_total/length(index_list),2)
+  tnr_overall<-round(tnr_total/length(index_list),2)
+  
+  # and output result
+  cat("Overall the cross validation of this model's performance's F1 is", F1_overall, ", accuracy is ",accuracy_overall,", true positive rate is",tpr_overall,", true negative rate is", tnr_overall,".\n")
+}
+```
+
+
+```{r}
+cross_validation(df_encoded_LR,index_list,1,0,1,1,0.5,"HeartDisease")
+```
+
+
+```{r}
+# Input: df, index_list, positive, positive weight,negative, threshold,target_col
+F1_total<-0
+accuracy_total<-0
+tpr_total<-0
+tnr_total<-0
+
+for (i in 1:length(index_list)) {
+  test_index<-index_list[[i]]
+  train_index<-unlist(index_list[-i])
+  
+  model<-backward_p_lr(df_encoded_LR,train_index,"HeartDisease",positive,positive_weight,positive)
+
+  predict_val<-predict(model,df[[test_index,]])
+  
+  result<-check_model_performance(predict_val,threshold, positive, negative, df, test_index, target_col)
+  accuracy<-result$accuracy
+  tpr<-result$tpr
+  tnr<-result$tnr
+  F1<-result$F1
+    
+    
+  F1_total<-F1_total+F1
+  accuracy_total<-accuracy_total+accuracy
+  tpr_total<-tpr_total+tpr
+  tnr_total<-tnr_total+tnr
+  
+  cat("The fold",i,"of total",length(index_list),"fold's F1 value is",F1,", accuracy is ",accuracy,", true positive rate is",tpr,", true negative rate is", tnr,".\n")
+}
+
+F1_overall<-round(F1_total/length(index_list),2)
+accuracy_overall<-round(accuracy_total/length(index_list),2)
+tpr_overall<-round(tpr_total/length(index_list),2)
+tnr_overall<-round(tnr_total/length(index_list),2)
+
+cat("Overall the cross validation of this model's performance's F1 is", F1_overall, ", accuracy is ",accuracy_overall,", true positive rate is",tpr_overall,", true negative rate is", tnr_overall,".\n")
+```
+
+
+```{r}
+prediction_sub<-vector("list",length(index_list))
+prediction_list<-vector("list",length(model_list))
+
+for (i in 1:length(model_list)) {
+  for (j in 1:length(index_list)) {
+    test_index<-index_list[[j]]
+    train_index<-unlist(index_list[-j])
+  
+    prediction_sub[[j]]<-predict(model_list[[i]],df_encoded_LR[test_index,],type="response")
+  }
+  prediction_list[[i]]<-Reduce("+",prediction_sub)/length(index_list)
+}
+  
+
+```
+
+## Check Model's Performance with Accuracy, True Positive Rate, True Negative Rate and F1 (func)
+```{r}
+# Input: 1). predict_prob: the prediction result (in probability/response)
+#        2). threshold: above what number is positive
+#        3). positive: target's positive value 
+#        4). negative: target's negative value
+#        5). df: the data frame you use to make prediction
+#        6). test_index: the index you select for test
+#        7). target_col: your target name 
+# Return:1). a list of result include accuracy, tpr, tnr, F1 value and output result
+check_model_performance<-function (predict_prob, threshold, positive, negative, df, test_index, target_col) {
+  
+  # First get prediciton & real value
+  prediction<-ifelse(predict_prob>=threshold,positive,negative)
+  true_value<-df[[target_col]][test_index]
+  
+  # Calculate their tn, tp, fp, fn
+  TN<-sum(prediction==negative&true_value==negative)  
+  TP<-sum(prediction==positive&true_value==positive)
+  FP<-sum(prediction==positive&true_value==negative)
+  FN<-sum(prediction==negative&true_value==positive)
+  
+  # Calculate their precision & recall for F1
+  # If denominator is zero, call zero as result to avoid NA
+  precision<-ifelse(TP+FP==0, 0, TP/(TP+FP))
+  recall<-ifelse(TP+FN==0, 0, TP/(TP+FN))
+  F1<-ifelse(precision+recall==0, 0, round(2*precision*recall/(precision+recall),2))
+  
+  # Calculate accuracy, tpr, tnr
+  accuracy<-round(((TP+TN)/(TP+TN+FP+FN))*100,2)
+  tpr<-round((TP/(TP+FN))*100,2)
+  tnr<-round((TN/(TN+FP))*100,2)
+  
+  # Print out result
+  cat("The accuracy for is", accuracy, "%. The True Positive Rate is ", tpr, "%. And the True Negative Rate is ", tnr, "% and the F1 score is", F1,".")
+  
+  return(list(accuracy,tpr,tnr,F1))
+}
+```
+
+
+```{r}
+k<-5
+
+positive_index<-which(df_encoded_LR$HeartDisease==1)
+negative_index<-which(df_encoded_LR$HeartDisease==0)
+
+length_sub_p<-floor(length(positive_index)/k)
+length_sub_n<-floor(length(negative_index)/k)
+
+index_list<-vector("list",k)
+
+# Loop over k stratified
+for (i in 1:k) {
+  # If this is the last one, include all index (so no one is left out)
+  if (i==k){
+    index_list[[i]]<-c(positive_index,negative_index)
+    break
+  }
+  
+  # Get positive index, negative index as designated portion so it won't fall in class imbalance
+  p_sub<-positive_index[1:length_sub_p]
+  n_sub<-negative_index[1:length_sub_n]
+  
+  # combine them as index list and shuffle so it won't be positive/negative cluster together
+  index_list[[i]]<-sample(c(p_sub,n_sub))
+  # remove selected index
+  positive_index<-positive_index[-(1:length_sub_p)]
+  negative_index<-negative_index[-(1:length_sub_n)]
+}
+
+```
+
+
+
+### Check Performance with k stratified (func 2)
+(need function backward_p_lr & check_model_performance to perform)
+```{r}
+# Input: 1). df: the data frame you wanna test with
+#        2). index_list: the index list generated earlier
+#        3). positive: target_col's positive value
+#        4). negative: target_col's negative value
+#        5). positive_weight: the portion of positive of overall value
+#        6). negative_weight: the portion of negative of overall value
+#        7). target_col: the column need to be predicted
+#        8). model_type: this function support "logistic regression", "random forest","c5.0","decision tree"
+#        9). threshold: set to 0.5, but can be changed
+# Return:Nothing, but will tell you the performance of this specific pipeline  
+# Usage: cross_validation(df,index_list,1,0,1,1,0.5,"col_name","lr")
+# Usage: library(randomForest)
+#        cross_validation(df,index_list,1,0,1,1,0.5,"col_name","rf")
+# Usage: library(C50)
+#        cross_validation(df,index_list,1,0,1,1,0.5,"col_name","c5")
+# Usage: library(rpart)
+#        cross_validation(df,index_list,1,0,1,1,0.5,"col_name","rpart")
+cross_validation<-function(df,index_list,positive,negative,positive_weight,negative_weight,target_col,model_type,threshold=0.5){
+  
+  # make sure target feature is factor (categorical feature)
+  df[[target_col]]<-factor(df[[target_col]], levels=c(negative, positive))
+  
+  # Initialization for overall performance calculation
+  F1_total<-0
+  accuracy_total<-0
+  tpr_total<-0
+  tnr_total<-0
+  
+  # For each index list in k fold index list
+  for (i in 1:length(index_list)) {
+    
+    # Select list i as test, rest as train
+    test_index<-index_list[[i]]
+    train_index<-unlist(index_list[-i])
+    
+    # If model_type is logistic regression, train logistic regression model with backward p
+    if (tolower(model_type) %in% c("logistic regression","lr")) {
+      # train model with train index
+      model<-backward_p_lr(df,train_index,target_col,positive,positive_weight,negative_weight)
+    
+      # get prediction probability with test index
+      predict<-predict(model,df[test_index,],type="response")
+      }
+    
+    # If model_type is random forest, train random forest model with probability as result
+    else if (tolower(model_type) %in% c("random forest","rf")) {
+      
+      # Train random forest model with train index
+      rf_model<-randomForest(as.formula(paste(target_col, "~ .")), data=df[train_index,], ntree=500, mtry=2, importance=TRUE)
+    
+      # get prediction probability with test index
+      predict<-predict(rf_model,df[test_index,],type="prob")[,as.character(positive)]
+    }
+    
+    
+    # If model_type is C5.0, train C5.0 model with probability as result
+    else if (tolower(model_type) %in% c("c5.0","c5")) {
+      
+      # train C5.0 model with train index
+      feature<-setdiff(names(df),target_col)
+      c5_m<-C5.0(x=df[train_index, feature],y=df[train_index, target_col],trials=10)
+      
+      # get prediction probability with test index
+      predict<-predict(c5_m, df[test_index,], type="prob")[,as.character(positive)]
+    }
+    
+    # If model_type is rpart, train rpart model with probability as result
+    else if (tolower(model_type) %in% c("rpart","decision tree")) {
+      
+      # train rpart model with train index
+      tree_m<-rpart(as.formula(paste(target_col, "~ .")), data=df[train_index,],method="class")
+      
+      # get prediction probability with test index
+      predict<-predict(tree_m, df[test_index,], type="prob")[,as.character(positive)]
+    }
+    
+    # If model does not belong to any model above, stop and send suggestion
+    else {
+      stop("Only support logistic regression, random forest, c5.0, decision tree")
+    }
+    
+    # output result so user can follow & not confused
+    cat("Now is runnung fold",i,"\n")
+    # get performance's value
+    result<-check_model_performance(predict,threshold, positive, negative, df, test_index, target_col)
+    accuracy<-result$accuracy
+    tpr<-result$tpr
+    tnr<-result$tnr
+    F1<-result$F1
+    
+    # calculate overall performance's value by adding up for future average calculation
+    F1_total<-F1_total+F1
+    accuracy_total<-accuracy_total+accuracy
+    tpr_total<-tpr_total+tpr
+    tnr_total<-tnr_total+tnr
+  }
+  
+  # get overall performance's value by calculate the mean
+  F1_overall<-round(F1_total/length(index_list),2)
+  accuracy_overall<-round(accuracy_total/length(index_list),2)
+  tpr_overall<-round(tpr_total/length(index_list),2)
+  tnr_overall<-round(tnr_total/length(index_list),2)
+  
+  # and output result
+  cat("Overall the cross validation of this model's performance's accuracy is ",accuracy_overall,"%, true positive rate is",tpr_overall,"%, true negative rate is", tnr_overall,"% and F1 is",F1_overall,".\n")
+}
+```
+
+
+```{r}
+library(C50)
+positive_weight<-1
+negative_weight<-1
+cross_validation(df_encoded_LR,index_list,1,0,positive_weight,negative_weight,"HeartDisease","rpart")
+```
+
+
+
+## Get Each Ensemble Model Weight with F1 (func)
+```{r}
+# Input: 1). model_list: the list of model, support logistic regression, C5.0, rpart, random forest
+#        2). df_list: the list of data frame align with model_list
+#        3). test_index: the index of 25% testing
+#        4). best_threshold: the best threshold you get after run function "find_best_threshold"
+#        5). target_col: the target column that need to make prediction
+#        6). positive: target positive value
+#        7). negative: target negative value
+# Return:1). Each Ensemble Model's Weight
+ensemble_weight_F1<-function(model_list, df_list,test_index, best_threshold, target_col, positive, negative) {
+  
+  # Initialize a list to store F1 value
+  F1_list<-list()
+  
+  # Initialization
+  prediction_list<-vector("list",length(model_list))
+  
+  # If the list of model only has one set of data frame
+  # make replication so its a list of data frame
+  if (inherits(df_list,"data.frame")) {
+    df_list <- rep(list(df_list), length(model_list))
+  }
+  
+  # Loop over all ensemble model
+  for (i in 1:length(prediction_list)) {
+    model<-model_list[[i]]
+    df<-df_list[[i]]
+    
+    if (inherits(model, "glm")) {
+      prediction_list[[i]]<-predict(model_list[[i]], df[test_index,], type="response")
+    }
+    else if (inherits(model, "randomForest") || inherits(model, "C5.0") || inherits(model,"rpart")) {
+      prediction_list[[i]]<-predict(model, df[test_index,], type="prob")[, as.character(positive)]
+    }
+    else {
+      stop("Only support logistic regression, randomForest, C5.0, rpart")
+    }
+  
+  prediction<-ifelse(prediction_list[[i]] >= best_threshold,positive,negative)
+  real_value<-df[[target_col]][test_index]
+    
+  # Calculate F1 with true value and predicted value and get it into list
+  TP<-sum(prediction==positive&real_value==positive)
+  FP<-sum(prediction==positive&real_value==negative)
+  FN<-sum(prediction==negative&real_value==positive)
+  precision<-TP/(TP+FP)
+  recall<-TP/(TP+FN)
+  F1<-2*(precision*recall)/(precision+recall)
+  F1_list[[i]]<-F1
+  cat("The model",i,"'s F1 is",round(F1_list[[i]],3),"\n")
+  }
+  
+  # Calculate weight and get it into list
+  F1_vector<-unlist(F1_list)
+  F1_weights<-F1_vector/sum(F1_vector)
+  weight_list<-as.list(F1_weights)
+  
+  cat("Each of their weight are",round(as.numeric(weight_list),3),".")
+  
+  return(weight_list)
+}
+```
+
+
+## Use Ensemble Model Make Prediction(func)
+```{r}
+# This Function Support Logistic Regression, RandomForest, C5.0 & rpart
+# Input: 1). model_list: list of logistic regression model
+#        2). df_list:  the list of data frame that aligned with model_list
+#        3). test_index: the list of index for ensemble train
+#        4). positive: target column's positive value
+#        5). target_treatment: if target feature is transformed in feature transformation
+# Return:1). Mean Prediction made by number of ensemble's logistic model
+make_ensemble_predict<-function (model_list,df_list,test_index,positive,target_treatment="none") {
+  
+  # Initialization
+  prediction_list<-vector("list",length(model_list))
+  
+  # If the list of model only has one set of data frame
+  # make replication so its a list of data frame
+  if (!is.list(df_list)) {
+    df_list <- rep(list(df_list), length(model_list))
+    }
+  
+  # For each model in ensemble model, make prediction
+  for (i in seq_along(model_list)) {
+    model<-model_list[[i]]
+    df<-df_list[[i]]
+    if (inherits(model, "glm")) {
+      prediction_list[[i]]<-predict(model_list[[i]], df[test_index,], type="response")
+    }
+    else if (inherits(model, "randomForest") || inherits(model, "C5.0") || inherits(model,"rpart")) {
+      prediction_list[[i]]<-predict(model, df[test_index,], type="prob")[, as.character(positive)]
+    }
+    else {
+      stop("Only support logistic regression, randomForest, C5.0, rpart")
+    }
+  }
+  
+  #  & calculate mean
+  ensemble_predictions<-Reduce("+",prediction_list)/length(model_list)
+  
+  # check if transformation occured or not
+  if (tolower(target_treatment)!="none") {
+    ensemble_predictions<-reverse_num(ensemble_predictions)
+  }
+  
+  return(ensemble_predictions)
+}
+```
+
+
+## Use Weight Make Prediction with Ensemble Model (func)
+```{r}
+# Support Logistic Regression, random forest, C5.0, rpart
+# Input: 1). model_list: the logistic regression model you create with your ensemble list
+#        2). df: the data frame you use to make prediction
+#        3). index: the index you wanna try with this model (usually test & val index)
+#        4). weight_list: the weight you get for each ensemble
+#        5). postive: target's positive value
+# Return:1). ensemble_predictions: list of prediction (in probability) made 
+#            with ensemble Logistic Regression model
+emsemble_result_with_weight<-function(model_list,df_list,index,weight_list,positive,target_treatment="none") {
+  
+  # If the list of model only has one set of data frame
+  # make replication so its a list of data frame
+  if (inherits(df_list,"data.frame")) {
+    df_list <- rep(list(df_list), length(model_list))
+  }
+  
+  # Check if model, weight and data frame are in same length, sending warning if not
+  if (length(model_list) != length(weight_list)) {
+    stop("Model List and Weight List must be equal number")
+  }
+  else if (length(model_list) != length(df_list)) {
+    stop("Model List and Data Frame List must be equal number")
+  }
+  
+  # Initialization
+  prediction_list<-vector("list",length(model_list))
+  
+  # For each model in ensemble model, make prediction
+  for (i in seq_along(model_list)) {
+    model<-model_list[[i]]
+    df<-df_list[[i]]
+    if (inherits(model, "glm")) {
+      prediction_list[[i]]<-predict(model, df[index,], type="response")
+      prediction_list[[i]]<-prediction_list[[i]]*weight_list[[i]]
+    }
+    else if (inherits(model, "randomForest") || inherits(model, "C5.0") || inherits(model,"rpart")) {
+      prediction_list[[i]]<-predict(model, df[index,], type="prob")[, as.character(positive)]
+      prediction_list[[i]]<-prediction_list[[i]]*weight_list[[i]]
+    }
+    else {
+      stop("Only support logistic regression, randomForest, C5.0, rpart")
+    }
+  }
+  
+  # Add up as final prediction value
+  ensemble_predictions<-Reduce("+",prediction_list)
+  
+  # Calculate ensemble model's mean as final prediciton value
+  if (tolower(target_treatment)!="none") {
+    ensemble_predictions<-reverse_num(ensemble_predictions,target_treatment)
+  }
+  
+  return(ensemble_predictions)
+}
+```
+
+## Stack Model for Categorical Prediction (with glm) (func 1~3)
+### Helper Function: generate a data frame that's ready for stack model training (func 1)
+(Remind user we only support logistic regression, random forest, C5.0 & rpart model)
+```{r}
+# This is a helper function designed for stack_model_lr & stack_model_predict_lr
+# The purpose of this function is to generate a data frame that's ready to train
+# or run a stack model
+# Input: 1). model_list: a list of model, support logistic regression, 
+#            random forest, C5.0 & rpart
+#        2). df_list: a list of data frame that aligned with model list
+#        3). index: the index you wanna use to train this model, could be test or validation
+#        4). positive: the positive value of your target
+# Return:1). a data frame that ready for stack model
+generate_stack_df<-function(model_list, df_list, index, positive) {
+  
+  # Initialization
+  stack_df<-data.frame(matrix(nrow = length(index), ncol = 0))
+  
+  # Initialization
+  prediction_list<-list()
+  
+  # If the list of model only has one set of data frame
+  # make replication so its a list of data frame
+  if (inherits(df_list,"data.frame")) {
+    df_list <- rep(list(df_list), length(model_list))
+  }
+  
+  # send warning if model list & data frame list is not same length
+  if (length(model_list) != length(df_list)) {
+    stop("Model List and Data Frame List must be equal number")
+  }
+  
+  # Loop over all ensemble model
+  for (i in 1:length(model_list)) {
+    model<-model_list[[i]]
+    df<-df_list[[i]]
+    
+    # if is logistic regression, make prediction with type response
+    # and get its model type for output result
+    if (inherits(model, "glm")) {
+      prediction_list[[i]]<-predict(model, df[index,], type="response")
+    }
+    
+    # if belongs to tree prediction, use probability make prediction and
+    else if (inherits(model, "randomForest") || inherits(model, "C5.0") || inherits(model,"rpart")) {
+      prediction_list[[i]]<-predict(model, df[index,], type="prob")[, as.character(positive)]
+    }
+    
+    # if other model type appeared, halt function and send suggestion
+    else {
+      stop("Only support logistic regression, randomForest, C5.0, rpart")
+    }
+    # paste prediction value into prediction list sequentially
+    stack_df[[paste0("model",i)]]<-prediction_list[[i]]
+  }
+  return(stack_df)
+}
+```
+
+### Build Stack Model with glm (func 2)
+```{r}
+# Purpose is use a list of model to train a stack model 
+# Support logistic regression, random forest, C5.0 & rpart
+# Input: 1). model_list: a list of model, support logistic regression, 
+#            random forest, C5.0 & rpart
+#        2). df_list: a list of data frame that aligned with model list
+#        3). test_index: the index you use prepare to tune model
+#        4). positive: the positive value of your target
+#        5). target_col: the feature you wanna make prediction
+# Return:1). stack_model: a stack model made with a list of model
+stack_model_lr<-function(model_list,df_list,test_index,positive,target_col){
+  
+  stack_df<-generate_stack_df(model_list,df_list,test_index, positive)
+  # Get real value
+  true_value<-as.numeric(as.character(df_list[[1]][[target_col]][test_index]))
+  
+  # Use real value & prediciton value build new logistic regression model
+  stack_model<-glm(true_value~., data=stack_df, family=binomial)
+  
+  # as a stack model
+  return (stack_model)
+}
+```
+
+
+### Test Stack Model with Your Data Set (func 3)
+(Use test to tune threshold & make final prediction)
+```{r}
+# This function's purpose is to use the stack model you build earlier to make
+# prediction
+# Input: 1). stack_model: the stack_model you build earlier
+#        2). model_list: a list of model, support logistic regression, 
+#            random forest, C5.0 & rpart
+#        3). df_list: a list of data frame that aligned with model list
+#        4). index: the index you wanna test this model, could be test & validation
+#        5). positive: the positive value of your target
+#        6). negative: the negative value of your target
+#        7). target_col: the feature you wanna make prediction
+#        8). threshold=0.5: I set to reasonable 0.5, but you can change this 
+#            after threshold tune
+# Return:1). Output the overall performance of stack model
+#        2). prediction_value: your prediction value for check purpose & threshold tune
+#        3). real_vaue: the true value for checking purpose & threshold tune
+stack_model_predict_lr<-function(stack_model,model_list,df_list,index,positive,negative,target_col,threshold=0.5){
+  
+  # Generate a data frame that suit stack model's purpose
+  stack_df<-generate_stack_df(model_list,df_list,index, positive)
+  
+  # Get real value
+  true_value<-as.numeric(as.character(df_list[[1]][[target_col]][index]))
+  
+  # Use prediction value & stack model make new prediction
+  prediction_value<-predict(stack_model,newdata=stack_df,type="response")
+  
+  # Output performance of stack model
+  result<-check_model_performance(prediction_value,threshold,positive,negative,df_list[[1]],index,target_col)
+  
+  # as a stack model
+  return (list(
+    prediction_value=prediction_value,
+    true_value=true_value
+  ))
+}
+```
+
+## Run
+```{r}
+stack_model<-stack_model_lr(model_list,df_list,test_index,1,"HeartDisease")
+```
+
+
+```{r}
+result<-stack_model_predict_lr(stack_model,model_list,df_list,test_index,1,0,"HeartDisease")
+prediction_value<-result$prediction_value
+true_value<-result$true_value
+```
+
+```{r}
+best_threshold<-find_best_threshold(prediction_value,df_C5,test_index,"HeartDisease",1,0)
+```
+
+```{r}
+result<-stack_model_predict_lr(stack_model,model_list,df_list,validation_index,1,0,"HeartDisease",best_threshold)
+```
+
+
+```{r}
+stack_model_predict_lr<-function(stack_model,model_list,df_list,validation_index,positive,negative,target_col,threshold=0.5){
+  
+  # Initialization
+  stack_df_val<-data.frame()
+  
+  # Initialization
+  prediction_list<-list()
+  
+  # If the list of model only has one set of data frame
+  # make replication so its a list of data frame
+  if (inherits(df_list,"data.frame")) {
+    df_list <- rep(list(df_list), length(model_list))
+  }
+  
+  # send warning if model list & data frame list is not same length
+  if (length(model_list) != length(df_list)) {
+    stop("Model List and Data Frame List must be equal number")
+  }
+  
+  # Loop over all ensemble model
+  for (i in 1:length(model_list)) {
+    model<-model_list[[i]]
+    df<-df_list[[i]]
+    
+    # if is logistic regression, make prediction with type response
+    # and get its model type for output result
+    if (inherits(model, "glm")) {
+      prediction_list[[i]]<-predict(model, df[validation_index,], type="response")
+    }
+    
+    # if belongs to tree prediction, use probability make prediction and
+    else if (inherits(model, "randomForest") || inherits(model, "C5.0") || inherits(model,"rpart")) {
+      prediction_list[[i]]<-predict(model, df[validation_index,], type="prob")[, as.character(positive)]
+    }
+    
+    # if other model type appeared, halt function and send suggestion
+    else {
+      stop("Only support logistic regression, randomForest, C5.0, rpart")
+    }
+    # paste prediction value into prediction list sequentially
+    stack_df_val[[paste0("model",i)]]<-prediction_list[[i]]
+  }
+  
+  # Get real value
+  true_value<-as.numeric(as.character(df_list[[1]][[target_col]][validation_index]))
+  
+  # Use prediciton value & stack model make new prediction
+  prediction_value<-predict(stack_model,newdata=stack_df_val,type="response")
+  
+  result<-check_model_performance(prediction_value,threshold,positive,negative,df_list[[1]],validation_index,target_col)
+  accuracy<-result$accuracy
+  tpr<-result$tpr
+  tnr<-result$tnr
+  F1<-result$F1
+  
+  cat("The Stack Model's accuracy is ",accuracy,", true positive rate is",tpr,", true negative rate is", tnr, "and F1 is ",F1,"\n")
+  
+  # as a stack model
+  return (list(
+    prediction_value=prediction_value,
+    true_value=true_value
+  ))
+}
+```
+
+
+```{r}
+automate_data_cleaning<-function(df) {
+  
+  # Initialize numerical columns & drop index
+  num_col<-which(sapply(df, is.numeric))
+  drop_index<-c()
+  
+  # For each numerical column
+  for (i in num_col) {
+    
+    # If na occurs less than 5%, na impute with median value
+    na_count <-sum(is.na(df[[i]]))
+    na_por<-na_count/nrow(df)
+    if (na_por<0.05 && na_por>0) {
+      df<-median_imputation(df,colnames(df)[i])
+    }
+    # If na occurs more then 30%, remove column
+    else if (na_por>0.3) {
+      drop_index<-c(drop_index, i)
+      cat("Feature",colnames(df)[i],"has more than 30% missing value, need to be droped")
+    }
+  }
+  if (length(drop_index)>0) {
+    df<-df[,-drop_index]
+  }
+  
+  # Recollect numerical column after feature with too many missing value droped
+  num_col<-which(sapply(df, is.numeric))
+  treat_col<-c()
+  
+  # If shapiro p smaller than 0.05 (not normally distributed)
+  # use IQR treatment for outliers
+  # otherwise (normally distributed) use z-score for outliers
+  for (i in num_col) {
+    if (sum(is.na(df[[i]]))==0) {
+      p<-shapiro.test(df[[i]])$p.value
+      if (p<0.05) {
+        df<-IQR_outlier(df,colnames(df)[i])
+        treat_col<-c(treat_col,i)
+      }
+      else {
+        df<-z_score_outlier(df,colnames(df)[i])
+        treat_col<-c(treat_col,i)
+      }
+    }
+  }
+  
+  # for result column with na, use kNN imputation
+  df<-automation_knn_imputation(df)
+  
+  n_treated_col<-setdiff(num_col,treat_col)
+  
+  for (i in n_treated_col) {
+    p<-shapiro.test(df[[i]])$p.value
+    if (p<0.05) {
+      df<-IQR_outlier(df,colnames(df)[i])
+    }
+    else {
+      df<-z_score_outlier(df,colnames(df)[i])
+    }
+  }
+  return(df)
+}
+```
+
+
+```{r}
+pca<-function(df) {
+  # if there are more than 1000 samples or more than 30 numerical 
+  # features, perform pca to reduce "dimension"
+  num_col<-sapply(df,is.numeric)
+  if (nrow(df)>1000 || length(num_col) >30) {
+    df_scale<-scale(df[,num_col])
+    
+  }
+}
+```
+

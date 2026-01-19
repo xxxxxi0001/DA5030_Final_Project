@@ -1,0 +1,25 @@
+---
+title: "table"
+output: html_document
+---
+
+```{r}
+model_performance<-data.frame(
+  Model=c("Logistic Regression","Logistic Regression","Logistic Regression","Random Forest","Random Forest","Random Forest","C5.0","C5.0","C5.0","Bag Ensemble","Bag Ensemble","Stack Ensemble","Stack Ensemble"),
+
+  Type=c("Cross Validation","Before Tune","After Tune","Cross Validation","Before Tune","After Tune","Cross Validation","Before Tune","After Tune","Before Tune","After Tune","Before Tune","After Tune"),
+  
+  Accuracy=c(lr_cv_a,bag_lr_bt_a,bag_lr_at_a,rf_cv_a,rf_bt_a,rf_at_a,c5_cv_a,c5_bt_a,c5_at_a,e1_bt_a,e1_at_a,e2_bt_a,e2_at_a),
+  
+  True_Positive_Rate=c(lr_cv_tpr,bag_lr_bt_tpr,bag_lr_at_tpr,rf_cv_tpr,rf_bt_tpr,rf_at_tpr,c5_cv_tpr,c5_bt_tpr, c5_at_tpr, e1_bt_tpr,e1_at_tpr,e2_bt_tpr,e2_at_tpr),
+  
+  True_Negative_Rate=c(lr_cv_tnr,bag_lr_bt_tnr,bag_lr_at_tnr,rf_cv_tnr,rf_bt_tnr,rf_at_tnr,c5_cv_tnr,c5_bt_tnr, c5_at_tnr, e1_bt_tnr,e1_at_tnr,e2_bt_tnr,e2_at_tnr),
+  
+  F1=c(lr_cv_F1,bag_lr_bt_F1,bag_lr_at_F1,rf_cv_F1,rf_bt_F1,rf_at_F1,c5_cv_F1,c5_bt_F1, c5_at_F1, e1_bt_F1,e1_at_F1,e2_bt_F1,e2_at_F1)
+ ) 
+```
+
+```{r}
+table(model_performance)
+```
+
